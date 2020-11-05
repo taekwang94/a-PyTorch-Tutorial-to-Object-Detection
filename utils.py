@@ -74,7 +74,7 @@ def create_data_lists(voc07_path, voc12_path, output_folder):
         for id in ids:
             # Parse annotation's XML file
             objects = parse_annotation(os.path.join(path, 'Annotations', id + '.xml'))
-            if len(objects) == 0:
+            if len(objects['boxes']) == 0:
                 continue
             n_objects += len(objects)
             train_objects.append(objects)
@@ -93,12 +93,12 @@ def create_data_lists(voc07_path, voc12_path, output_folder):
     print('\nThere are %d training images containing a total of %d objects. Files have been saved to %s.' % (
         len(train_images), n_objects, os.path.abspath(output_folder)))
 
-    # Validation data
+    # Test data
     test_images = list()
     test_objects = list()
     n_objects = 0
 
-    # Find IDs of images in validation data
+    # Find IDs of images in the test data
     with open(os.path.join(voc07_path, 'ImageSets/Main/test.txt')) as f:
         ids = f.read().splitlines()
 
@@ -119,7 +119,7 @@ def create_data_lists(voc07_path, voc12_path, output_folder):
     with open(os.path.join(output_folder, 'TEST_objects.json'), 'w') as j:
         json.dump(test_objects, j)
 
-    print('\nThere are %d validation images containing a total of %d objects. Files have been saved to %s.' % (
+    print('\nThere are %d test images containing a total of %d objects. Files have been saved to %s.' % (
         len(test_images), n_objects, os.path.abspath(output_folder)))
 
 
@@ -156,6 +156,7 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
     :param true_difficulties: list of tensors, one tensor for each image containing actual objects' difficulty (0 or 1)
     :return: list of average precisions for all classes, mean average precision (mAP)
     """
+
     assert len(det_boxes) == len(det_labels) == len(det_scores) == len(true_boxes) == len(
         true_labels) == len(
         true_difficulties)  # these are all lists of tensors of the same length, i.e. number of images
@@ -178,9 +179,9 @@ def calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, tr
     for i in range(len(det_labels)):
         det_images.extend([i] * det_labels[i].size(0))
     det_images = torch.LongTensor(det_images).to(device)  # (n_detections)
-    det_boxes = torch.cat(det_boxes, dim=0)  # (n_detections, 4)
-    det_labels = torch.cat(det_labels, dim=0)  # (n_detections)
-    det_scores = torch.cat(det_scores, dim=0)  # (n_detections)
+    det_boxes = torch.cat(det_boxes, dim=0).to(device)  # (n_detections, 4)
+    det_labels = torch.cat(det_labels, dim=0).to(device)   # (n_detections)
+    det_scores = torch.cat(det_scores, dim=0).to(device)   # (n_detections)
 
     assert det_images.size(0) == det_boxes.size(0) == det_labels.size(0) == det_scores.size(0)
 
@@ -602,7 +603,7 @@ def transform(image, boxes, labels, difficulties, split):
     new_boxes = boxes
     new_labels = labels
     new_difficulties = difficulties
-    # Skip the following operations if validation/evaluation
+    # Skip the following operations for evaluation/testing
     if split == 'TRAIN':
         # A series of photometric distortions in random order, each with 50% chance of occurrence, as in Caffe repo
         new_image = photometric_distort(new_image)
@@ -666,29 +667,19 @@ def accuracy(scores, targets, k):
     return correct_total.item() * (100.0 / batch_size)
 
 
-def save_checkpoint(epoch, epochs_since_improvement, model, optimizer, loss, best_loss, is_best):
+def save_checkpoint(epoch, model, optimizer):
     """
     Save model checkpoint.
 
     :param epoch: epoch number
-    :param epochs_since_improvement: number of epochs since last improvement
     :param model: model
     :param optimizer: optimizer
-    :param loss: validation loss in this epoch
-    :param best_loss: best validation loss achieved so far (not necessarily in this checkpoint)
-    :param is_best: is this checkpoint the best so far?
     """
     state = {'epoch': epoch,
-             'epochs_since_improvement': epochs_since_improvement,
-             'loss': loss,
-             'best_loss': best_loss,
              'model': model,
              'optimizer': optimizer}
     filename = 'checkpoint_ssd300.pth.tar'
     torch.save(state, filename)
-    # If this checkpoint is the best so far, store a copy so it doesn't get overwritten by a worse checkpoint
-    if is_best:
-        torch.save(state, 'BEST_' + filename)
 
 
 class AverageMeter(object):
